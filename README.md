@@ -1,0 +1,93 @@
+# E-Commerce Real-Time Data Pipeline
+
+A modern, end-to-end data engineering pipeline demonstrating real-time ingestion, stream processing, and storage using **Apache Kafka**, **Apache Spark Structured Streaming**, and **Delta Lake** structured around the **Medallion Architecture**.
+
+---
+
+## ── Architecture Overview
+
+This project simulates a real-time e-commerce clickstream data pipeline, scaling from raw ingestion to business-ready KPIs.
+[ Faker Producer ] ──> [ Kafka Topic ]
+│
+▼ (Spark Structured Streaming)
+┌───────────────┐
+│ BRONZE LAYER  │ ──> Raw Ingestion (Delta / MinIO)
+└───────────────┘
+│
+▼
+┌───────────────┐
+│ SILVER LAYER  │ ──> Flattened, Cleaned & Deduplicated (5m Watermark)
+└───────────────┘
+│
+▼
+┌───────────────┐
+│  GOLD LAYER   │ ──> Tumbling Windows & KPIs (10m Watermark)
+└───────────────┘
+
+### 🛠️ Tech Stack
+* **Orchestration:** Docker & Docker Compose
+* **Ingestion:** Apache Kafka (KRaft mode, ZooKeeperless)
+* **Stream Processing:** Apache Spark Structured Streaming
+* **Storage Layer:** Delta Lake on MinIO (S3-compatible Object Storage)
+* **Data Generation:** Python (Faker library)
+
+---
+
+## ── Pipeline Breakdown
+
+### 1. Ingestion Layer (Kafka)
+* A Python script utilizes the `Faker` library to generate mock e-commerce clickstream events (e.g., user logins, product views, cart additions, purchases).
+* Events are continuously published to a Kafka topic named `ecommerce-events`.
+* The Kafka broker runs inside a Docker container utilizing **KRaft mode** for cluster management.
+
+### 2. Medallion Architecture (Spark & Delta Lake)
+
+#### 🟫 Bronze Layer (Raw Ingestion)
+* **Objective:** Capture the raw stream immediately with minimal overhead.
+* **Implementation:** Ingests the raw JSON payload from Kafka and appends it directly to a Delta Lake table backed by MinIO storage.
+* **Fault Tolerance:** Implements Spark **checkpointing** to track offsets, ensuring exactly-once processing guarantees.
+* **Trigger:** Configured with a `processingTime` micro-batch trigger of **10 seconds**.
+
+#### ⬜ Silver Layer (Cleaned & Structured)
+* **Objective:** Structure, clean, and enrich the raw data for downstream consumption.
+* **Implementation:** Parses the raw JSON string into a strongly-typed schema and flattens nested elements. Adds an execution timestamp (`processed_at`) for observability.
+* **Deduplication:** Utilizes a **5-minute watermark** on the event time to dynamically drop duplicate `eventId` records from the state store.
+
+#### 🟨 Gold Layer (Aggregations & KPIs)
+* **Objective:** Produce high-level, business-ready metrics.
+* **Implementation:** Computes real-time KPIs (e.g., total purchases, active users) grouped by **5-minute tumbling windows**.
+* **Late Data Handling:** Employs a **10-minute watermark** to allow late-arriving events to be factored into window calculations before the state is finalized and evicted.
+
+---
+
+## ── Local Development Setup
+
+### Prerequisites
+* Docker & Docker Compose
+* Python 3.10+ (for local producer simulation)
+
+### 1. Spin up the Infrastructure
+Bring up Kafka, MinIO, Spark Master, and Spark Worker containers:
+```bash
+docker-compose up -d
+Note: A helper container (minio-init) will automatically run to create the lakehouse bucket inside MinIO upon startup.
+
+2. Start the Stream Producer
+Install requirements and start generating fake clickstream traffic into Kafka:
+
+Bash
+pip install confluent-kafka faker
+python producer.py
+3. Submit Spark Streaming Jobs
+Submit your Spark application to the master node:
+
+Bash
+docker exec -it spark-master /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/spark_jobs/bronze_ingest.py
+
+
+── Key Takeaways & Observations
+Resource Constraints: Running concurrent, stateful streaming jobs (deduplication + windowed aggregations) inside a local Docker environment quickly highlights local CPU and memory bottlenecks.
+
+State Management: Fine-tuning watermarks (5-minute vs. 10-minute thresholds) is critical to maintaining a healthy memory footprint and preventing unbounded state store growth.
