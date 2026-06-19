@@ -7,22 +7,21 @@ A modern, end-to-end data engineering pipeline demonstrating real-time ingestion
 ## ── Architecture Overview
 
 This project simulates a real-time e-commerce clickstream data pipeline, scaling from raw ingestion to business-ready KPIs.
-[ Faker Producer ] ──> [ Kafka Topic ]
-│
-▼ (Spark Structured Streaming)
-┌───────────────┐
-│ BRONZE LAYER  │ ──> Raw Ingestion (Delta / MinIO)
-└───────────────┘
-│
-▼
-┌───────────────┐
-│ SILVER LAYER  │ ──> Flattened, Cleaned & Deduplicated (5m Watermark)
-└───────────────┘
-│
-▼
-┌───────────────┐
-│  GOLD LAYER   │ ──> Tumbling Windows & KPIs (10m Watermark)
-└───────────────┘
+```
+[Kafka Producer]
+     │  (e-commerce events as JSON)
+     ▼
+[Apache Kafka]  ◄── KRaft mode, single broker
+     │
+     ▼
+[Spark Structured Streaming]
+     │
+     ├──► Bronze Layer (Delta Lake) — raw events, append-only
+     │
+     ├──► Silver Layer (Delta Lake) — cleaned, deduplicated, typed
+     │
+     └──► Gold Layer  (Delta Lake) — windowed aggregations, KPIs
+```
 
 ### 🛠️ Tech Stack
 * **Orchestration:** Docker & Docker Compose
