@@ -1,92 +1,423 @@
-# E-Commerce Real-Time Data Pipeline
+# Real-Time E-Commerce Events Anomaly Detection & AI Agent Alerting Platform
 
-A modern, end-to-end data engineering pipeline demonstrating real-time ingestion, stream processing, and storage using **Apache Kafka**, **Apache Spark Structured Streaming**, and **Delta Lake** structured around the **Medallion Architecture**.
+## Overview
+
+This project demonstrates an end-to-end real-time data engineering and AI-powered monitoring platform built using both a local open-source stack and Databricks Lakehouse.
+
+The platform simulates an e-commerce clickstream environment, processes events through a Medallion Architecture (Bronze → Silver → Gold), detects anomalies in near real time, and generates AI-powered incident summaries that are delivered automatically to a Discord channel.
+
+The project was implemented in two environments:
+
+1. **Local Streaming Platform**
+
+   * Kafka
+   * Spark Structured Streaming
+   * Delta Lake
+   * MinIO (S3-compatible storage)
+   * Docker
+
+2. **Databricks Lakehouse Platform**
+
+   * Unity Catalog
+   * Volumes
+   * Delta Tables
+   * Databricks Jobs
+   * OpenAI Integration
+   * Discord Notifications
 
 ---
 
-## ── Architecture Overview
+## Business Problem
 
-This project simulates a real-time e-commerce clickstream data pipeline, scaling from raw ingestion to business-ready KPIs.
+Modern digital platforms generate millions of events every day. Revenue-impacting issues such as checkout failures, payment gateway outages, tracking failures, or sudden traffic drops often remain unnoticed until significant business impact occurs.
+
+This project aims to:
+
+* Detect anomalies automatically
+* Provide context-aware incident analysis
+* Reduce time to detection
+* Improve operational visibility
+* Demonstrate modern Data Engineering + AI Agent patterns
+
+---
+
+# Architecture
+
+## Local Streaming Architecture
+
+```text
+Event Generator
+       │
+       ▼
+    Kafka
+       │
+       ▼
+Bronze Layer
+(Spark Streaming)
+       │
+       ▼
+Silver Layer
+(Data Quality + Cleansing)
+       │
+       ▼
+Gold Layer
+(KPI Aggregation)
+       │
+       ▼
+Alerting Agent
+(OpenAI)
+       │
+       ▼
+Discord Notifications
 ```
-[Kafka Producer]
-     │  (e-commerce events as JSON)
-     ▼
-[Apache Kafka]  ◄── KRaft mode, single broker
-     │
-     ▼
-[Spark Structured Streaming]
-     │
-     ├──► Bronze Layer (Delta Lake) — raw events, append-only
-     │
-     ├──► Silver Layer (Delta Lake) — cleaned, deduplicated, typed
-     │
-     └──► Gold Layer  (Delta Lake) — windowed aggregations, KPIs
+
+### Technologies
+
+* Python
+* Kafka
+* Spark Structured Streaming
+* Delta Lake
+* MinIO
+* Docker
+* OpenAI API
+* Discord Webhooks
+
+---
+
+## Databricks Lakehouse Architecture
+
+```text
+JSON Event Generator
+         │
+         ▼
+Databricks Volume
+         │
+         ▼
+Bronze Delta Table
+         │
+         ▼
+Silver Delta Table
+         │
+         ▼
+Gold KPI Table
+         │
+         ▼
+AI Alerting Agent
+         │
+         ▼
+Discord Channel
 ```
 
-### 🛠️ Tech Stack
-* **Orchestration:** Docker & Docker Compose
-* **Ingestion:** Apache Kafka (KRaft mode, ZooKeeperless)
-* **Stream Processing:** Apache Spark Structured Streaming
-* **Storage Layer:** Delta Lake on MinIO (S3-compatible Object Storage)
-* **Data Generation:** Python (Faker library)
+### Technologies
+
+* Databricks Free Edition
+* Unity Catalog
+* Delta Lake
+* Databricks Jobs
+* Structured Streaming
+* OpenAI API
+* Discord Webhooks
 
 ---
 
-## ── Pipeline Breakdown
+# Data Model
 
-### 1. Ingestion Layer (Kafka)
-* A Python script utilizes the `Faker` library to generate mock e-commerce clickstream events (e.g., user logins, product views, cart additions, purchases).
-* Events are continuously published to a Kafka topic named `ecommerce-events`.
-* The Kafka broker runs inside a Docker container utilizing **KRaft mode** for cluster management.
+## Bronze Layer
 
-### 2. Medallion Architecture (Spark & Delta Lake)
+Stores raw event data exactly as received.
 
-#### 🟫 Bronze Layer (Raw Ingestion)
-* **Objective:** Capture the raw stream immediately with minimal overhead.
-* **Implementation:** Ingests the raw JSON payload from Kafka and appends it directly to a Delta Lake table backed by MinIO storage.
-* **Fault Tolerance:** Implements Spark **checkpointing** to track offsets, ensuring exactly-once processing guarantees.
-* **Trigger:** Configured with a `processingTime` micro-batch trigger of **10 seconds**.
+### Example Schema
 
-#### ⬜ Silver Layer (Cleaned & Structured)
-* **Objective:** Structure, clean, and enrich the raw data for downstream consumption.
-* **Implementation:** Parses the raw JSON string into a strongly-typed schema and flattens nested elements. Adds an execution timestamp (`processed_at`) for observability.
-* **Deduplication:** Utilizes a **5-minute watermark** on the event time to dynamically drop duplicate `eventId` records from the state store.
+| Column          | Type      |
+| --------------- | --------- |
+| user_id         | string    |
+| event_type      | string    |
+| product_id      | string    |
+| amount          | double    |
+| page            | string    |
+| event_timestamp | timestamp |
 
-#### 🟨 Gold Layer (Aggregations & KPIs)
-* **Objective:** Produce high-level, business-ready metrics.
-* **Implementation:** Computes real-time KPIs (e.g., total purchases, active users) grouped by **5-minute tumbling windows**.
-* **Late Data Handling:** Employs a **10-minute watermark** to allow late-arriving events to be factored into window calculations before the state is finalized and evicted.
+Purpose:
+
+* Raw ingestion
+* Replayability
+* Auditability
 
 ---
 
-## ── Local Development Setup
+## Silver Layer
 
-### Prerequisites
-* Docker & Docker Compose
-* Python 3.10+ (for local producer simulation)
+Performs:
 
-### 1. Spin up the Infrastructure
-Bring up Kafka, MinIO, Spark Master, and Spark Worker containers:
-```bash
-docker-compose up -d
-Note: A helper container (minio-init) will automatically run to create the lakehouse bucket inside MinIO upon startup.
+* Schema enforcement
+* Data quality validation
+* Deduplication
+* Standardization
 
-2. Start the Stream Producer
-Install requirements and start generating fake clickstream traffic into Kafka:
+Additional Columns:
 
-Bash
-pip install confluent-kafka faker
-python producer.py
-3. Submit Spark Streaming Jobs
-Submit your Spark application to the master node:
+| Column            | Description          |
+| ----------------- | -------------------- |
+| processed_at      | Processing timestamp |
+| validation_status | Valid / Invalid      |
 
-Bash
-docker exec -it spark-master /opt/spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
-  /opt/spark_jobs/bronze_ingest.py
+---
 
+## Gold Layer
 
-── Key Takeaways & Observations
-Resource Constraints: Running concurrent, stateful streaming jobs (deduplication + windowed aggregations) inside a local Docker environment quickly highlights local CPU and memory bottlenecks.
+Business KPI aggregation using 5-minute windows.
 
-State Management: Fine-tuning watermarks (5-minute vs. 10-minute thresholds) is critical to maintaining a healthy memory footprint and preventing unbounded state store growth.
+### Metrics
+
+| Metric          | Description              |
+| --------------- | ------------------------ |
+| total_events    | Total events             |
+| unique_users    | Approximate unique users |
+| total_revenue   | Purchase revenue         |
+| purchase_count  | Number of purchases      |
+| conversion_rate | Purchases / Events       |
+| avg_order_value | Revenue / Purchases      |
+
+---
+
+# Anomaly Detection Framework
+
+Anomalies are detected using deterministic rules.
+
+## Revenue Drop
+
+Trigger:
+
+```python
+current_revenue < previous_revenue * 0.6
+```
+
+## Conversion Drop
+
+Trigger:
+
+```python
+conversion_rate < 0.01
+```
+
+## Traffic Drop
+
+Trigger:
+
+```python
+current_users < previous_users * 0.5
+```
+
+## No Purchases
+
+Trigger:
+
+```python
+purchase_count == 0
+```
+
+---
+
+# AI Alerting Agent
+
+The Alerting Agent enriches KPI anomalies with supporting business context before generating an incident report.
+
+## Inputs
+
+### Gold Layer
+
+* Revenue
+* Conversion Rate
+* Purchase Count
+* Unique Users
+
+### Silver Layer Context
+
+#### Funnel Metrics
+
+```text
+page_view
+product_view
+add_to_cart
+checkout
+purchase
+```
+
+#### Category Metrics
+
+```text
+Electronics
+Books
+Clothing
+```
+
+#### Page Activity
+
+```text
+Home
+Product
+Cart
+Checkout
+```
+
+---
+
+## Agent Workflow
+
+```text
+Gold KPI Window
+        │
+        ▼
+Anomaly Detection
+        │
+        ▼
+Context Retrieval
+        │
+        ▼
+OpenAI Analysis
+        │
+        ▼
+Discord Notification
+        │
+        ▼
+Alert History Table
+```
+
+---
+
+# Discord Incident Notifications
+
+Example Alert:
+![alt text](image.png)
+```
+
+---
+
+# Alert History
+
+To prevent duplicate notifications, every alert is recorded.
+
+### Schema
+
+| Column          | Description       |
+| --------------- | ----------------- |
+| window_start    | Window start      |
+| window_end      | Window end        |
+| alert_sent_at   | Timestamp         |
+| anomaly_reasons | Triggered rules   |
+| alert_text      | Generated summary |
+
+---
+
+# Databricks Workflow
+
+Workflow Tasks:
+
+```text
+Generate Events
+        │
+        ▼
+Bronze Ingestion
+        │
+        ▼
+Silver Transformation
+        │
+        ▼
+Gold Aggregation
+        │
+        ▼
+Alerting Agent
+```
+
+---
+
+# Repository Structure
+
+```text
+real-time-anomaly-alerting-lakehouse/
+
+├── README.md
+│
+├── local_docker_version/
+│   ├── producer/
+│   ├── spark_jobs/
+│   ├── alerting/
+│   └── docker-compose.yaml
+│
+├── databricks_version/
+│   ├── notebooks/
+│   ├── workflow/
+│   └── sql/
+│
+├── screenshots/
+│
+├── architecture/
+│
+└── docs/
+```
+
+---
+
+# Key Engineering Concepts Demonstrated
+
+### Streaming Data Processing
+
+* Spark Structured Streaming
+* Event-time processing
+* Watermarking
+* Window aggregations
+
+### Data Lakehouse
+
+* Delta Lake
+* Bronze/Silver/Gold architecture
+* Incremental processing
+
+### Data Quality
+
+* Validation rules
+* Deduplication
+* Schema enforcement
+
+### Observability
+
+* KPI monitoring
+* Alert history tracking
+* Incident reporting
+
+### AI Integration
+
+* OpenAI-powered incident analysis
+* Context-aware alert generation
+* Automated operational notifications
+
+---
+
+# Future Enhancements
+
+* Dynamic threshold detection
+* Statistical anomaly detection
+* ML-based forecasting
+* Multi-channel notifications (Slack, Teams, PagerDuty)
+* Agentic root-cause investigation
+* Real-time dashboarding
+* Historical anomaly trend analysis
+
+---
+
+# Skills Demonstrated
+
+* Data Engineering
+* Streaming Architectures
+* Delta Lake
+* Databricks
+* PySpark
+* Kafka
+* Data Modeling
+* Data Quality Engineering
+* Workflow Orchestration
+* AI Agents
+* OpenAI Integration
+* Production Monitoring
+* Incident Management
+* Cloud Data Platforms
